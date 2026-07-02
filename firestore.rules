@@ -1,0 +1,71 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function isVerifiedEmail() { return isSignedIn() && request.auth.token.email_verified == true; }
+    function incomingData() { return request.resource.data; }
+    function existingData() { return resource.data; }
+
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isOwner(userId) && isVerifiedEmail();
+      allow update: if isOwner(userId);
+      allow delete: if false;
+    }
+    match /jobs/{jobId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isVerifiedEmail() && incomingData().customerId == request.auth.uid;
+      allow update: if isSignedIn() && (existingData().customerId == request.auth.uid || existingData().workerId == request.auth.uid);
+      allow delete: if isSignedIn() && existingData().customerId == request.auth.uid && existingData().status == 'open';
+    }
+    match /conversations/{conversationId} {
+      allow read: if isSignedIn() && (existingData().customerId == request.auth.uid || existingData().workerId == request.auth.uid);
+      allow create: if isSignedIn() && isVerifiedEmail() && incomingData().customerId == request.auth.uid;
+      allow update: if isSignedIn() && (existingData().customerId == request.auth.uid || existingData().workerId == request.auth.uid);
+      allow delete: if false;
+    }
+    match /messages/{messageId} {
+      allow read: if isSignedIn() && (existingData().senderId == request.auth.uid || get(/databases/$(database)/documents/conversations/$(existingData().conversationId)).data.customerId == request.auth.uid || get(/databases/$(database)/documents/conversations/$(existingData().conversationId)).data.workerId == request.auth.uid);
+      allow create: if isSignedIn() && isVerifiedEmail() && (incomingData().senderId == request.auth.uid || incomingData().senderId == "ai");
+      allow update: if isSignedIn() && existingData().senderId == request.auth.uid;
+      allow delete: if false;
+    }
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow create: if isSignedIn() && isVerifiedEmail() && incomingData().reviewerId == request.auth.uid;
+      allow update: if isSignedIn() && existingData().reviewerId == request.auth.uid;
+      allow delete: if false;
+    }
+    match /payments/{paymentId} {
+      allow read: if isSignedIn() && (existingData().customerId == request.auth.uid || existingData().workerId == request.auth.uid);
+      allow create: if isSignedIn() && isVerifiedEmail() && incomingData().customerId == request.auth.uid;
+      allow update: if false;
+      allow delete: if false;
+    }
+    match /payouts/{payoutId} {
+      allow read: if isSignedIn() && (existingData().workerId == request.auth.uid || existingData().customerId == request.auth.uid);
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+    match /disputes/{disputeId} {
+      allow read: if isSignedIn() && (existingData().customerId == request.auth.uid || existingData().workerId == request.auth.uid);
+      allow create: if isSignedIn() && isVerifiedEmail() && (incomingData().customerId == request.auth.uid || incomingData().workerId == request.auth.uid);
+      allow update: if isSignedIn() && (existingData().customerId == request.auth.uid || existingData().workerId == request.auth.uid);
+      allow delete: if false;
+    }
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Haklat exam manager
+    match /agents/{id} { allow read, write: if true; }
+    match /students/{id} { allow read, write: if true; }
+    match /sessions/{id} {
+      allow read, write: if true;
+      match /attendance/{studentId} { allow read, write: if true; }
+    }
+  }
+}
