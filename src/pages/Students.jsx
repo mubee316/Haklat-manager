@@ -11,7 +11,14 @@ const WAEC_SUBJECTS = [
   "French", "Visual Art", "Music", "Physical Education",
 ];
 
-const empty = { name: "", type: "external", agentId: "", subjects: [] };
+const COMPULSORY_SUBJECTS = ["English Language", "Mathematics"];
+
+const withCompulsory = (subjects = []) => [
+  ...COMPULSORY_SUBJECTS,
+  ...subjects.filter((s) => !COMPULSORY_SUBJECTS.includes(s)),
+];
+
+const empty = { name: "", type: "external", agentId: "", subjects: [...COMPULSORY_SUBJECTS] };
 
 export default function Students() {
   const [students, setStudents] = useState([]);
@@ -38,13 +45,14 @@ export default function Students() {
 
   const openAdd = () => { setForm(empty); setEditId(null); setModal("form"); };
   const openEdit = (s) => {
-    setForm({ name: s.name, type: s.type, agentId: s.agentId || "", subjects: s.subjects || [] });
+    setForm({ name: s.name, type: s.type, agentId: s.agentId || "", subjects: withCompulsory(s.subjects) });
     setEditId(s.id);
     setModal("form");
   };
   const closeModal = () => { setModal(null); setCustomSubject(""); };
 
   const toggleSubject = (sub) => {
+    if (COMPULSORY_SUBJECTS.includes(sub)) return;
     setForm((f) => ({
       ...f,
       subjects: f.subjects.includes(sub)
@@ -65,7 +73,7 @@ export default function Students() {
     e.preventDefault();
     if (form.subjects.length === 0) { alert("Please select at least one subject."); return; }
     setSaving(true);
-    const data = { ...form, agentId: form.type === "internal" ? "" : form.agentId };
+    const data = { ...form, subjects: withCompulsory(form.subjects), agentId: form.type === "internal" ? "" : form.agentId };
     if (editId) { await updateStudent(editId, data); }
     else { await addStudent(data); }
     await load();
@@ -79,7 +87,7 @@ export default function Students() {
     load();
   };
 
-  const openView = (s) => { setForm({ name: s.name, type: s.type, agentId: s.agentId || "", subjects: s.subjects || [] }); setEditId(s.id); setModal("view"); };
+  const openView = (s) => { setForm({ name: s.name, type: s.type, agentId: s.agentId || "", subjects: withCompulsory(s.subjects) }); setEditId(s.id); setModal("view"); };
 
   const filtered = students.filter((s) => {
     const matchSearch = s.name.toLowerCase().includes(search.toLowerCase());
@@ -231,17 +239,23 @@ export default function Students() {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Subjects *</label>
+              <p className="text-xs text-gray-400 mb-1.5">English Language and Mathematics are compulsory for every student.</p>
               <div className="flex flex-wrap gap-1.5 mb-2 max-h-48 overflow-y-auto border border-gray-100 rounded-lg p-2 bg-gray-50">
-                {WAEC_SUBJECTS.map((sub) => (
-                  <button
-                    key={sub}
-                    type="button"
-                    onClick={() => toggleSubject(sub)}
-                    className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${form.subjects.includes(sub) ? "bg-gray-900 text-white border-gray-700" : "bg-white text-gray-600 border-gray-200 hover:border-gray-500"}`}
-                  >
-                    {sub}
-                  </button>
-                ))}
+                {WAEC_SUBJECTS.map((sub) => {
+                  const compulsory = COMPULSORY_SUBJECTS.includes(sub);
+                  return (
+                    <button
+                      key={sub}
+                      type="button"
+                      disabled={compulsory}
+                      onClick={() => toggleSubject(sub)}
+                      title={compulsory ? "Compulsory subject" : undefined}
+                      className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${form.subjects.includes(sub) ? "bg-gray-900 text-white border-gray-700" : "bg-white text-gray-600 border-gray-200 hover:border-gray-500"} ${compulsory ? "opacity-90 cursor-not-allowed" : ""}`}
+                    >
+                      {sub}{compulsory ? " *" : ""}
+                    </button>
+                  );
+                })}
               </div>
               <div className="flex gap-2">
                 <input
