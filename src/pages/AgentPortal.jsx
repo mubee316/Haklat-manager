@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { getAgentByToken, getStudentsByAgent, addStudent, updateStudent, deleteStudent } from "../lib/firestore";
 import Modal from "../components/Modal";
+import StudentIdentityFields, { getStudentFullName, getStudentIdentity } from "../components/StudentIdentityFields";
+import { uploadPassport } from "../lib/passports";
 
 const WAEC_SUBJECTS = [
   "English Language", "Mathematics", "Biology", "Chemistry", "Physics",
@@ -12,7 +14,7 @@ const WAEC_SUBJECTS = [
   "French", "Visual Art", "Music", "Physical Education",
 ];
 
-const emptyForm = { name: "", subjects: [] };
+const emptyForm = { firstName:"", surname:"", otherName:"", nin:"", dateOfBirth:"", phone:"", passportUrl:"", passportFile:null, subjects:[] };
 
 export default function AgentPortal() {
   const { token } = useParams();
@@ -26,6 +28,7 @@ export default function AgentPortal() {
   const [editId, setEditId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [customSubject, setCustomSubject] = useState("");
+  const [saveError, setSaveError] = useState("");
 
   const loadStudents = (agentId) => getStudentsByAgent(agentId).then(setStudents);
 
@@ -40,9 +43,9 @@ export default function AgentPortal() {
       .finally(() => setLoading(false));
   }, [token]);
 
-  const openAdd = () => { setForm(emptyForm); setEditId(null); setCustomSubject(""); setModal("form"); };
-  const openEdit = (s) => { setForm({ name: s.name, subjects: s.subjects || [] }); setEditId(s.id); setCustomSubject(""); setModal("form"); };
-  const openView = (s) => { setForm({ name: s.name, subjects: s.subjects || [] }); setEditId(s.id); setModal("view"); };
+  const openAdd = () => { setForm(emptyForm); setEditId(null); setCustomSubject(""); setSaveError(""); setModal("form"); };
+  const openEdit = (s) => { setForm({ ...getStudentIdentity(s), subjects:s.subjects||[] }); setEditId(s.id); setCustomSubject(""); setSaveError(""); setModal("form"); };
+  const openView = (s) => { setForm({ ...getStudentIdentity(s), subjects:s.subjects||[] }); setEditId(s.id); setModal("view"); };
   const closeModal = () => { setModal(null); setCustomSubject(""); };
 
   const toggleSubject = (sub) =>
@@ -62,13 +65,15 @@ export default function AgentPortal() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (form.subjects.length === 0) { alert("Please select at least one subject."); return; }
-    setSaving(true);
-    const data = { name: form.name, subjects: form.subjects, type: "external", agentId: agent.id };
-    if (editId) { await updateStudent(editId, data); }
-    else { await addStudent(data); }
-    await loadStudents(agent.id);
-    setSaving(false);
-    closeModal();
+    setSaving(true); setSaveError("");
+    try {
+      const passportUrl=form.passportFile ? await uploadPassport(form.passportFile) : form.passportUrl;
+      const identity={firstName:form.firstName.trim(),surname:form.surname.trim(),otherName:form.otherName.trim(),nin:form.nin.trim(),dateOfBirth:form.dateOfBirth,phone:form.phone.trim(),passportUrl};
+      const data={...identity,name:getStudentFullName(identity),subjects:form.subjects,type:"external",agentId:agent.id};
+      if(editId) await updateStudent(editId,data); else await addStudent(data);
+      await loadStudents(agent.id); closeModal();
+    } catch(err) { setSaveError(err.message || "Failed to save candidate."); }
+    finally { setSaving(false); }
   };
 
   const handleDelete = async (id) => {
@@ -151,7 +156,7 @@ export default function AgentPortal() {
                 {students.map((s, i) => (
                   <tr key={s.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3 text-gray-400 text-xs">{i + 1}</td>
-                    <td className="px-4 py-3 font-medium text-gray-800">{s.name}</td>
+                    <td className="px-4 py-3 font-medium text-gray-800">{getStudentFullName(s)}</td>
                     <td className="px-4 py-3 text-gray-500 hidden sm:table-cell">{(s.subjects || []).length} subject{(s.subjects || []).length !== 1 ? "s" : ""}</td>
                     <td className="px-4 py-3 text-right">
                       <button onClick={() => openView(s)} className="text-xs text-gray-500 hover:text-gray-800 mr-3">View</button>
@@ -172,7 +177,13 @@ export default function AgentPortal() {
 
       {/* View modal */}
       {modal === "view" && (
-        <Modal title={form.name} onClose={closeModal}>
+        <Modal title={getStudentFullName(form)} onClose={closeModal}>
+          <div className="space-y-3 text-sm mb-5">
+            <p>NIN: {form.nin || "Not provided"}</p>
+            <p>Date of Birth: {form.dateOfBirth || "Not provided"}</p>
+            <p>Phone: {form.phone || "Not provided"}</p>
+            {form.passportUrl && <p>Passport: <a href={form.passportUrl} target="_blank" rel="noreferrer" className="text-blue-600">View passport</a></p>}
+          </div>
           <div>
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Subjects ({form.subjects.length})</p>
             <div className="flex flex-wrap gap-1.5">
@@ -192,17 +203,7 @@ export default function AgentPortal() {
       {modal === "form" && (
         <Modal title={editId ? "Edit Candidate" : "Register Candidate"} onClose={closeModal}>
           <form onSubmit={handleSubmit} className="space-y-5">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Full Name <span className="text-red-400">*</span></label>
-              <input
-                type="text"
-                required
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="Enter candidate's full name"
-                className="input"
-              />
-            </div>
+            <StudentIdentityFields form={form} setForm={setForm} />
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -238,6 +239,7 @@ export default function AgentPortal() {
               </div>
             </div>
 
+            {saveError && <p className="text-sm text-red-600 bg-red-50 rounded-lg p-3">{saveError}</p>}
             <div className="flex justify-end gap-2 pt-1">
               <button type="button" onClick={closeModal} className="px-4 py-2 text-sm text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50">Cancel</button>
               <button type="submit" disabled={saving} className="bg-gray-900 hover:bg-gray-800 text-white px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-60">

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { getStudents, addStudent, updateStudent, deleteStudent, getAgents } from "../lib/firestore";
 import Modal from "../components/Modal";
+import StudentIdentityFields, { getStudentFullName, getStudentIdentity } from "../components/StudentIdentityFields";
+import { uploadPassport } from "../lib/passports";
 
 const WAEC_SUBJECTS = [
   "English Language", "Mathematics", "Biology", "Chemistry", "Physics",
@@ -18,7 +20,7 @@ const withCompulsory = (subjects = []) => [
   ...subjects.filter((s) => !COMPULSORY_SUBJECTS.includes(s)),
 ];
 
-const empty = { name: "", type: "external", agentId: "", subjects: [...COMPULSORY_SUBJECTS] };
+const empty = { firstName:"", surname:"", otherName:"", nin:"", dateOfBirth:"", phone:"", passportUrl:"", passportFile:null, type:"external", agentId:"", subjects:[...COMPULSORY_SUBJECTS] };
 
 export default function Students() {
   const [students, setStudents] = useState([]);
@@ -31,6 +33,7 @@ export default function Students() {
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState("all");
   const [customSubject, setCustomSubject] = useState("");
+  const [saveError, setSaveError] = useState("");
 
   const load = () =>
     Promise.all([getStudents(), getAgents()]).then(([s, a]) => {
@@ -43,11 +46,10 @@ export default function Students() {
 
   const agentMap = Object.fromEntries(agents.map((a) => [a.id, a]));
 
-  const openAdd = () => { setForm(empty); setEditId(null); setModal("form"); };
+  const openAdd = () => { setForm(empty); setEditId(null); setSaveError(""); setModal("form"); };
   const openEdit = (s) => {
-    setForm({ name: s.name, type: s.type, agentId: s.agentId || "", subjects: withCompulsory(s.subjects) });
-    setEditId(s.id);
-    setModal("form");
+    setForm({ ...getStudentIdentity(s), type:s.type, agentId:s.agentId||"", subjects:withCompulsory(s.subjects) });
+    setEditId(s.id); setSaveError(""); setModal("form");
   };
   const closeModal = () => { setModal(null); setCustomSubject(""); };
 
@@ -72,13 +74,15 @@ export default function Students() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (form.subjects.length === 0) { alert("Please select at least one subject."); return; }
-    setSaving(true);
-    const data = { ...form, subjects: withCompulsory(form.subjects), agentId: form.type === "internal" ? "" : form.agentId };
-    if (editId) { await updateStudent(editId, data); }
-    else { await addStudent(data); }
-    await load();
-    setSaving(false);
-    closeModal();
+    setSaving(true); setSaveError("");
+    try {
+      const passportUrl=form.passportFile ? await uploadPassport(form.passportFile) : form.passportUrl;
+      const identity={firstName:form.firstName.trim(),surname:form.surname.trim(),otherName:form.otherName.trim(),nin:form.nin.trim(),dateOfBirth:form.dateOfBirth,phone:form.phone.trim(),passportUrl};
+      const data={...identity,name:getStudentFullName(identity),type:form.type,agentId:form.type==="internal"?"":form.agentId,subjects:withCompulsory(form.subjects)};
+      if(editId) await updateStudent(editId,data); else await addStudent(data);
+      await load(); closeModal();
+    } catch(err) { setSaveError(err.message || "Failed to save student."); }
+    finally { setSaving(false); }
   };
 
   const handleDelete = async (id) => {
@@ -87,10 +91,10 @@ export default function Students() {
     load();
   };
 
-  const openView = (s) => { setForm({ name: s.name, type: s.type, agentId: s.agentId || "", subjects: withCompulsory(s.subjects) }); setEditId(s.id); setModal("view"); };
+  const openView = (s) => { setForm({ ...getStudentIdentity(s), type:s.type, agentId:s.agentId||"", subjects:withCompulsory(s.subjects) }); setEditId(s.id); setModal("view"); };
 
   const filtered = students.filter((s) => {
-    const matchSearch = s.name.toLowerCase().includes(search.toLowerCase());
+    const matchSearch = getStudentFullName(s).toLowerCase().includes(search.toLowerCase());
     const matchType = filterType === "all" || s.type === filterType;
     return matchSearch && matchType;
   });
@@ -147,7 +151,7 @@ export default function Students() {
                 const agent = agentMap[s.agentId];
                 return (
                   <tr key={s.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3 font-medium text-gray-800">{s.name}</td>
+                    <td className="px-4 py-3 font-medium text-gray-800">{getStudentFullName(s)}</td>
                     <td className="px-4 py-3">
                       <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${s.type === "internal" ? "bg-blue-100 text-blue-700" : "bg-orange-100 text-orange-700"}`}>
                         {s.type}
@@ -173,9 +177,13 @@ export default function Students() {
       )}
 
       {modal === "view" && (
-        <Modal title={form.name} onClose={closeModal}>
+        <Modal title={getStudentFullName(form)} onClose={closeModal}>
           <div className="space-y-3 text-sm">
             <Row label="Type" value={<span className={`px-2 py-0.5 rounded-full text-xs font-medium ${form.type === "internal" ? "bg-blue-100 text-blue-700" : "bg-orange-100 text-orange-700"}`}>{form.type}</span>} />
+            <Row label="NIN" value={form.nin || "Not provided"} />
+            <Row label="Date of Birth" value={form.dateOfBirth || "Not provided"} />
+            <Row label="Phone" value={form.phone || "Not provided"} />
+            {form.passportUrl && <Row label="Passport" value={<a href={form.passportUrl} target="_blank" rel="noreferrer">View passport</a>} />}
             {form.type === "external" && (
               <Row
                 label="Agent / School"
@@ -205,9 +213,7 @@ export default function Students() {
       {modal === "form" && (
         <Modal title={editId ? "Edit Student" : "Add Student"} onClose={closeModal}>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <Field label="Full Name *">
-              <input type="text" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Aisha Bello" className="input" />
-            </Field>
+            <StudentIdentityFields form={form} setForm={setForm} />
 
             <Field label="Student Type *">
               <div className="flex gap-3">
@@ -273,6 +279,7 @@ export default function Students() {
               )}
             </div>
 
+            {saveError && <p className="text-sm text-red-600 bg-red-50 rounded-lg p-3">{saveError}</p>}
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={closeModal} className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">Cancel</button>
               <button type="submit" disabled={saving} className="bg-gray-900 hover:bg-gray-800 text-white px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-60">

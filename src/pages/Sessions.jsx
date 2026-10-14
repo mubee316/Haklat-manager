@@ -117,6 +117,8 @@ export default function Sessions() {
                 <option>WAEC</option>
                 <option>NECO</option>
                 <option>NABTEB</option>
+                <option>BECE</option>
+                <option>Placement</option>
                 <option>Other</option>
               </select>
             </Field>
